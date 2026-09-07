@@ -103,7 +103,7 @@ export const connectYouTube = async (): Promise<YouTubeAuthStatus> => {
           reject(new Error('YouTube authorization returned no code.'))
           return
         }
-        response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end('<h2>Signal Live Studio connected</h2><p>You can close this window.</p>')
+        response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end('<h2>Tarang connected</h2><p>You can close this window.</p>')
         resolve(authorizationCode)
       } catch (error) {
         reject(error instanceof Error ? error : new Error('Invalid OAuth callback.'))

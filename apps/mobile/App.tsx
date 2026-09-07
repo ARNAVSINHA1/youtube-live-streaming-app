@@ -49,7 +49,7 @@ export default function App() {
         <View style={styles.header}>
           <View style={styles.brandRow}>
             <View style={styles.brandMark}><Text style={styles.brandMarkText}>S</Text></View>
-            <View><Text style={styles.brand}>SIGNAL</Text><Text style={styles.brandSub}>LIVE STUDIO</Text></View>
+            <View><Text style={styles.brand}>TARANG</Text><Text style={styles.brandSub}>LIVE. CREATE. CONNECT,</Text></View>
           </View>
           <View style={styles.connectedPill}><View style={styles.statusDot} /><Text style={styles.connectedText}>OFFLINE</Text></View>
         </View>

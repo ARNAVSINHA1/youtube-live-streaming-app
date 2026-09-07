@@ -37,8 +37,8 @@
   },
   "build": {
     "appId": "com.signallivestudio.desktop",
-    "productName": "Signal Live Studio",
-    "artifactName": "Signal-Live-Studio-${version}-${arch}.${ext}",
+    "productName": "Tarang - Live. Create. Connect,",
+    "artifactName": "Tarang-Live-Create-Connect-${version}-${arch}.${ext}",
     "directories": {
       "output": "release"
     },

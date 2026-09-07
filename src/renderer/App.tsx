@@ -35,6 +35,10 @@ import { addScene, addSource, createDefaultSceneCollection, createSource, duplic
 import { audioChannels, type StreamStatus } from './studio-state'
 
 const iconMap = { display: Monitor, window: Monitor, camera: Camera, image: Image, music: Music2, audio: Music2, text: Image, background: Image }
+const streamFormats = {
+  horizontal: { label: 'Horizontal Live', width: 1920, height: 1080 },
+  vertical: { label: 'Shorts / Vertical', width: 1080, height: 1920 },
+} as const
 
 const loadSceneCollection = (): SceneCollection => {
   try {
@@ -48,6 +52,7 @@ const loadSceneCollection = (): SceneCollection => {
 export function App() {
   const [sceneCollection, setSceneCollection] = useState<SceneCollection>(loadSceneCollection)
   const [streamStatus, setStreamStatus] = useState<StreamStatus>('Disconnected')
+    const [streamFormat, setStreamFormat] = useState<keyof typeof streamFormats>('horizontal')
   const [captureStream, setCaptureStream] = useState<MediaStream | null>(null)
   const [captureError, setCaptureError] = useState<string | null>(null)
   const [captureSources, setCaptureSources] = useState<Array<{ id: string; name: string; type: 'screen' | 'window' }>>([])
@@ -82,6 +87,7 @@ export function App() {
   const activeSceneRecord = sceneCollection.scenes.find((scene) => scene.id === activeScene) ?? sceneCollection.scenes[0]
   const sources = activeSceneRecord?.sources ?? []
   const isLive = streamStatus === 'Streaming'
+  const output = streamFormats[streamFormat]
 
   useEffect(() => {
     window.localStorage.setItem('signal.scene-collection', JSON.stringify(sceneCollection))
@@ -165,8 +171,8 @@ export function App() {
   useEffect(() => {
     const canvas = compositorCanvasRef.current
     if (!canvas) return
-    canvas.width = 1920
-    canvas.height = 1080
+    canvas.width = output.width
+    canvas.height = output.height
     const context = canvas.getContext('2d')
     if (!context) return
     const draw = () => {
@@ -182,6 +188,15 @@ export function App() {
         context.drawImage(cameraVideoRef.current, 0, 0, cameraWidth, cameraHeight)
         context.restore()
       }
+      context.save()
+      context.font = '700 54px Space Grotesk, sans-serif'
+      context.textAlign = 'right'
+      context.textBaseline = 'bottom'
+      context.shadowColor = 'rgba(0, 0, 0, .75)'
+      context.shadowBlur = 12
+      context.fillStyle = '#ffffff'
+      context.fillText('TARANG LIVE', canvas.width - 42, canvas.height - 38)
+      context.restore()
       compositorFrameRef.current = requestAnimationFrame(draw)
     }
     draw()
@@ -189,7 +204,7 @@ export function App() {
       if (compositorFrameRef.current !== null) cancelAnimationFrame(compositorFrameRef.current)
       compositorFrameRef.current = null
     }
-  }, [cameraStream, captureStream])
+  }, [cameraStream, captureStream, output.height, output.width])
 
   useEffect(() => () => {
     captureStream?.getTracks().forEach((track) => track.stop())
@@ -349,7 +364,7 @@ export function App() {
     setGoLiveBusy(true)
     setStreamStatus('Preparing')
     try {
-      await window.studio.prepareGoLive({ title: 'Morning Broadcast', description: 'Signal Live Studio broadcast', privacyStatus: 'private' })
+      await window.studio.prepareGoLive({ title: 'Morning Broadcast', description: 'Tarang broadcast', privacyStatus: 'private' })
       const canvas = compositorCanvasRef.current
       if (!canvas) throw new Error('Scene compositor is unavailable.')
       const composedVideo = canvas.captureStream(30)
@@ -407,7 +422,7 @@ export function App() {
       <aside className="sidebar">
         <div className="brand-lockup">
           <div className="brand-mark"><Radio size={20} strokeWidth={2.5} /></div>
-          <div><strong>Signal</strong><span>LIVE STUDIO</span></div>
+          <div><strong>Tarang</strong><span>LIVE. CREATE. CONNECT,</span></div>
         </div>
         <nav className="primary-nav" aria-label="Primary navigation">
           <button className="nav-item active"><LayoutDashboard size={18} /> <span>Studio</span></button>
@@ -434,15 +449,15 @@ export function App() {
         <div className="studio-grid">
           <section className="preview-panel panel">
             <div className="panel-header"><div><span className="eyebrow">Preview</span><h2>{activeSceneRecord?.name}</h2></div><div className="preview-meta"><span className="preview-live-dot" /> LIVE PREVIEW <button className="icon-button compact" aria-label="Preview options"><MoreHorizontal size={18} /></button></div></div>
-            <div className={`preview-canvas ${captureStream ? 'has-capture' : ''}`}>
+            <div className={`preview-canvas ${streamFormat === 'vertical' ? 'vertical' : ''} ${captureStream ? 'has-capture' : ''}`}>
               {captureStream && <video className="preview-video" ref={previewVideoRef} autoPlay muted playsInline />}
               {!captureStream && <><div className="canvas-grid" /><div className="empty-preview"><div className="preview-icon"><Monitor size={28} /></div><strong>Preview ready</strong><span>Add a capture source to see your scene here.</span></div></>}
-              <div className="canvas-label"><span>1920 x 1080</span><span>30 FPS</span></div>
+              <div className="canvas-label"><span>{output.width} x {output.height}</span><span>30 FPS</span></div>
               {captureStream && <div className="capture-label"><Monitor size={14} /><span>Desktop Capture</span></div>}
               {cameraStream && <div className="camera-tile"><video ref={cameraVideoRef} autoPlay muted playsInline /><span><Camera size={12} /> Camera</span></div>}
               <canvas ref={compositorCanvasRef} className="compositor-canvas" aria-hidden="true" />
             </div>
-            <div className="preview-controls"><select className="capture-source-select" value={selectedCaptureSource} onChange={(event) => setSelectedCaptureSource(event.target.value)} disabled={Boolean(captureStream)} aria-label="Capture source"><option value="">Select capture source</option>{captureSources.map((source) => <option key={source.id} value={source.id}>{source.type === 'screen' ? 'Display' : 'Window'}: {source.name}</option>)}</select><button className="control-button" onClick={captureStream ? stopDisplayCapture : startDisplayCapture}>{captureStream ? <><Square size={16} fill="currentColor" /> Stop capture</> : <><Monitor size={16} /> Start capture</>}</button><span className={`control-hint ${captureError ? 'capture-error' : ''}`}>{captureError ?? (captureStream ? 'Real Windows display frames are in the preview.' : 'Select a display or window to preview it.')}</span><button className="icon-button" aria-label="Preview performance"><Gauge size={17} /></button></div>
+            <div className="preview-controls"><select className="capture-source-select" value={streamFormat} onChange={(event) => setStreamFormat(event.target.value as keyof typeof streamFormats)} disabled={isLive} aria-label="Stream format"><option value="horizontal">Horizontal Live · 16:9</option><option value="vertical">Shorts / Vertical · 9:16</option></select><select className="capture-source-select" value={selectedCaptureSource} onChange={(event) => setSelectedCaptureSource(event.target.value)} disabled={Boolean(captureStream)} aria-label="Capture source"><option value="">Select capture source</option>{captureSources.map((source) => <option key={source.id} value={source.id}>{source.type === 'screen' ? 'Display' : 'Window'}: {source.name}</option>)}</select><button className="control-button" onClick={captureStream ? stopDisplayCapture : startDisplayCapture}>{captureStream ? <><Square size={16} fill="currentColor" /> Stop capture</> : <><Monitor size={16} /> Start capture</>}</button><span className={`control-hint ${captureError ? 'capture-error' : ''}`}>{captureError ?? (captureStream ? 'Real Windows display frames are in the preview.' : 'Select a display or window to preview it.')}</span><button className="icon-button" aria-label="Preview performance"><Gauge size={17} /></button></div>
           </section>
 
           <section className="scene-panel panel">
@@ -472,7 +487,7 @@ export function App() {
         {goLiveError && <div className="go-live-error">{goLiveError}</div>}
         <button className="go-live-button" onClick={() => void toggleStream()} disabled={goLiveBusy || streamStatus === 'Preparing'}>{isLive || streamStatus === 'Connecting' ? <><Square size={16} fill="currentColor" /> Stop stream</> : <><Video size={17} /> Start stream</>}</button>
         <div className="rail-section"><div className="rail-section-heading"><span>Stream health</span><Wifi size={16} /></div><div className="health-empty"><Activity size={19} /><span>Health data appears<br />when you are live.</span></div></div>
-        <div className="rail-section details-section"><div className="rail-section-heading"><span>Session details</span><MoreHorizontal size={16} /></div><dl><div><dt>Resolution</dt><dd>1920 x 1080</dd></div><div><dt>Frame rate</dt><dd>{captureMetrics.fps ? `${Math.round(captureMetrics.fps)} FPS` : '0 FPS'}</dd></div><div><dt>Bitrate</dt><dd>{streamMetrics.bitrateKbps || 0} Kbps</dd></div><div><dt>Dropped frames</dt><dd>{captureMetrics.droppedFrames}</dd></div><div><dt>CPU / memory</dt><dd>{systemMetrics.cpuPercent.toFixed(1)}% / {systemMetrics.memoryMb} MB</dd></div><div><dt>GPU</dt><dd>{systemMetrics.gpuPercent === null ? 'Unavailable' : `${systemMetrics.gpuPercent.toFixed(1)}%`}</dd></div><div><dt>Encoder</dt><dd>{ffmpegAvailable ? 'FFmpeg available' : 'FFmpeg unavailable'}</dd></div></dl></div>
+          <div className="rail-section details-section"><div className="rail-section-heading"><span>Session details</span><MoreHorizontal size={16} /></div><dl><div><dt>Format</dt><dd>{output.label}</dd></div><div><dt>Resolution</dt><dd>{output.width} x {output.height}</dd></div><div><dt>Frame rate</dt><dd>{captureMetrics.fps ? `${Math.round(captureMetrics.fps)} FPS` : '0 FPS'}</dd></div><div><dt>Bitrate</dt><dd>{streamMetrics.bitrateKbps || 0} Kbps</dd></div><div><dt>Dropped frames</dt><dd>{captureMetrics.droppedFrames}</dd></div><div><dt>CPU / memory</dt><dd>{systemMetrics.cpuPercent.toFixed(1)}% / {systemMetrics.memoryMb} MB</dd></div><div><dt>GPU</dt><dd>{systemMetrics.gpuPercent === null ? 'Unavailable' : `${systemMetrics.gpuPercent.toFixed(1)}%`}</dd></div><div><dt>Encoder</dt><dd>{ffmpegAvailable ? 'FFmpeg available' : 'FFmpeg unavailable'}</dd></div></dl></div>
         <div className="rail-footer"><AudioLines size={15} /> Audio input ready <span className="ready-dot" /></div>
       </aside>
     </main>
