@@ -33,11 +33,30 @@ import {
 } from 'lucide-react'
 import { addScene, addSource, createDefaultSceneCollection, createSource, duplicateSource, moveSource, removeSource, renameScene, setSourceVisibility, updateSourceTransform, type SceneCollection } from '@youtube-live-studio/core'
 import { audioChannels, type StreamStatus } from './studio-state'
+import welcomeHorizontal from '../img/welcome_16x9.png'
+import welcomeVertical from '../img/welcome_9x16.png'
+import startingHorizontal from '../img/starting_soon_16x9.png'
+import startingVertical from '../img/starting_soon_9x16.png'
+import breakHorizontal from '../img/be_right_back_16x9.png'
+import breakVertical from '../img/be_right_back_9x16.png'
+import horizontalOverlay from '../img/horizontal_overlay.png'
+import verticalOverlay from '../img/vertical_overlay.png'
 
 const iconMap = { display: Monitor, window: Monitor, camera: Camera, image: Image, music: Music2, audio: Music2, text: Image, background: Image }
 const streamFormats = {
   horizontal: { label: 'Horizontal Live', width: 1920, height: 1080 },
   vertical: { label: 'Shorts / Vertical', width: 1080, height: 1920 },
+} as const
+
+const sceneImages = {
+  main: { horizontal: welcomeHorizontal, vertical: welcomeVertical },
+  starting: { horizontal: startingHorizontal, vertical: startingVertical },
+  break: { horizontal: breakHorizontal, vertical: breakVertical },
+} as const
+const sceneOverlays = { horizontal: horizontalOverlay, vertical: verticalOverlay } as const
+const streamWindows = {
+  horizontal: { x: 0.105, y: 0.215, width: 0.575, height: 0.55 },
+  vertical: { x: 0.06, y: 0.238, width: 0.875, height: 0.3 },
 } as const
 
 const loadSceneCollection = (): SceneCollection => {
@@ -88,6 +107,9 @@ export function App() {
   const sources = activeSceneRecord?.sources ?? []
   const isLive = streamStatus === 'Streaming'
   const output = streamFormats[streamFormat]
+  const sceneImage = sceneImages[activeScene as keyof typeof sceneImages]?.[streamFormat]
+  const sceneOverlay = activeScene === 'main' ? sceneOverlays[streamFormat] : null
+  const streamWindow = streamWindows[streamFormat]
 
   useEffect(() => {
     window.localStorage.setItem('signal.scene-collection', JSON.stringify(sceneCollection))
@@ -175,10 +197,32 @@ export function App() {
     canvas.height = output.height
     const context = canvas.getContext('2d')
     if (!context) return
+    const image = sceneImage ? new window.Image() : null
+    if (image && sceneImage) image.src = sceneImage
+    const overlay = sceneOverlay ? new window.Image() : null
+    if (overlay && sceneOverlay) overlay.src = sceneOverlay
     const draw = () => {
       context.fillStyle = '#111417'
       context.fillRect(0, 0, canvas.width, canvas.height)
-      if (previewVideoRef.current?.readyState && captureStream) context.drawImage(previewVideoRef.current, 0, 0, canvas.width, canvas.height)
+      if (overlay?.complete && overlay.naturalWidth) {
+        context.drawImage(overlay, 0, 0, canvas.width, canvas.height)
+        if (previewVideoRef.current?.readyState && captureStream) {
+          const x = canvas.width * streamWindow.x
+          const y = canvas.height * streamWindow.y
+          const width = canvas.width * streamWindow.width
+          const height = canvas.height * streamWindow.height
+          context.save()
+          context.beginPath()
+          context.rect(x, y, width, height)
+          context.clip()
+          context.drawImage(previewVideoRef.current, x, y, width, height)
+          context.restore()
+        }
+      } else if (image?.complete && image.naturalWidth) {
+        context.drawImage(image, 0, 0, canvas.width, canvas.height)
+      } else if (previewVideoRef.current?.readyState && captureStream) {
+        context.drawImage(previewVideoRef.current, 0, 0, canvas.width, canvas.height)
+      }
       if (cameraVideoRef.current?.readyState && cameraStream) {
         const cameraWidth = 420
         const cameraHeight = 260
@@ -204,7 +248,7 @@ export function App() {
       if (compositorFrameRef.current !== null) cancelAnimationFrame(compositorFrameRef.current)
       compositorFrameRef.current = null
     }
-  }, [cameraStream, captureStream, output.height, output.width])
+  }, [activeScene, cameraStream, captureStream, output.height, output.width, sceneImage, sceneOverlay, streamWindow.height, streamWindow.width, streamWindow.x, streamWindow.y])
 
   useEffect(() => () => {
     captureStream?.getTracks().forEach((track) => track.stop())
@@ -451,6 +495,7 @@ export function App() {
             <div className="panel-header"><div><span className="eyebrow">Preview</span><h2>{activeSceneRecord?.name}</h2></div><div className="preview-meta"><span className="preview-live-dot" /> LIVE PREVIEW <button className="icon-button compact" aria-label="Preview options"><MoreHorizontal size={18} /></button></div></div>
             <div className={`preview-canvas ${streamFormat === 'vertical' ? 'vertical' : ''} ${captureStream ? 'has-capture' : ''}`}>
               {captureStream && <video className="preview-video" ref={previewVideoRef} autoPlay muted playsInline />}
+              {(sceneOverlay || sceneImage) && <img className={`scene-preview-image ${sceneOverlay ? 'has-overlay' : ''}`} src={sceneOverlay ?? sceneImage} alt={`${activeSceneRecord?.name ?? 'Scene'} preview`} />}
               {!captureStream && <><div className="canvas-grid" /><div className="empty-preview"><div className="preview-icon"><Monitor size={28} /></div><strong>Preview ready</strong><span>Add a capture source to see your scene here.</span></div></>}
               <div className="canvas-label"><span>{output.width} x {output.height}</span><span>30 FPS</span></div>
               {captureStream && <div className="capture-label"><Monitor size={14} /><span>Desktop Capture</span></div>}
