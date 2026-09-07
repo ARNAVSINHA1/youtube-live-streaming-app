@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   Activity,
   AudioLines,
@@ -48,6 +48,9 @@ const loadSceneCollection = (): SceneCollection => {
 export function App() {
   const [sceneCollection, setSceneCollection] = useState<SceneCollection>(loadSceneCollection)
   const [streamStatus, setStreamStatus] = useState<StreamStatus>('Disconnected')
+  const [captureStream, setCaptureStream] = useState<MediaStream | null>(null)
+  const [captureError, setCaptureError] = useState<string | null>(null)
+  const previewVideoRef = useRef<HTMLVideoElement>(null)
   const activeScene = sceneCollection.activeSceneId
   const activeSceneRecord = sceneCollection.scenes.find((scene) => scene.id === activeScene) ?? sceneCollection.scenes[0]
   const sources = activeSceneRecord?.sources ?? []
@@ -56,6 +59,15 @@ export function App() {
   useEffect(() => {
     window.localStorage.setItem('signal.scene-collection', JSON.stringify(sceneCollection))
   }, [sceneCollection])
+
+  useEffect(() => {
+    if (previewVideoRef.current) previewVideoRef.current.srcObject = captureStream
+    return () => {
+      if (previewVideoRef.current) previewVideoRef.current.srcObject = null
+    }
+  }, [captureStream])
+
+  useEffect(() => () => captureStream?.getTracks().forEach((track) => track.stop()), [captureStream])
 
   const updateCollection = (next: SceneCollection) => setSceneCollection(next)
   const selectScene = (sceneId: string) => updateCollection({ ...sceneCollection, activeSceneId: sceneId })
@@ -79,6 +91,22 @@ export function App() {
   const nudgeSource = (sourceId: string) => {
     const source = sources.find((item) => item.id === sourceId)
     if (source) updateCollection(updateSourceTransform(sceneCollection, activeScene, sourceId, { x: source.transform.x + 10, y: source.transform.y + 10, opacity: Math.max(0.2, source.transform.opacity - 0.05) }))
+  }
+
+  const startDisplayCapture = async () => {
+    setCaptureError(null)
+    try {
+      const stream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 30 }, audio: false })
+      stream.getVideoTracks()[0]?.addEventListener('ended', () => setCaptureStream(null), { once: true })
+      setCaptureStream(stream)
+    } catch (error) {
+      setCaptureError(error instanceof DOMException && error.name === 'NotAllowedError' ? 'Display capture was cancelled or denied.' : 'Display capture could not be started.')
+    }
+  }
+
+  const stopDisplayCapture = () => {
+    captureStream?.getTracks().forEach((track) => track.stop())
+    setCaptureStream(null)
   }
 
   const toggleStream = () => {
@@ -116,13 +144,13 @@ export function App() {
         <div className="studio-grid">
           <section className="preview-panel panel">
             <div className="panel-header"><div><span className="eyebrow">Preview</span><h2>{activeSceneRecord?.name}</h2></div><div className="preview-meta"><span className="preview-live-dot" /> LIVE PREVIEW <button className="icon-button compact" aria-label="Preview options"><MoreHorizontal size={18} /></button></div></div>
-            <div className="preview-canvas">
-              <div className="canvas-grid" />
-              <div className="empty-preview"><div className="preview-icon"><Monitor size={28} /></div><strong>Preview ready</strong><span>Add a capture source to see your scene here.</span></div>
+            <div className={`preview-canvas ${captureStream ? 'has-capture' : ''}`}>
+              {captureStream && <video className="preview-video" ref={previewVideoRef} autoPlay muted playsInline />}
+              {!captureStream && <><div className="canvas-grid" /><div className="empty-preview"><div className="preview-icon"><Monitor size={28} /></div><strong>Preview ready</strong><span>Add a capture source to see your scene here.</span></div></>}
               <div className="canvas-label"><span>1920 x 1080</span><span>30 FPS</span></div>
-              <div className="camera-placeholder"><Camera size={16} /><span>Face Camera</span></div>
+              {captureStream && <div className="capture-label"><Monitor size={14} /><span>Desktop Capture</span></div>}
             </div>
-            <div className="preview-controls"><button className="control-button"><Play size={16} fill="currentColor" /> Play preview</button><span className="control-hint">Preview is local only until you connect a source.</span><button className="icon-button" aria-label="Preview performance"><Gauge size={17} /></button></div>
+            <div className="preview-controls"><button className="control-button" onClick={captureStream ? stopDisplayCapture : startDisplayCapture}>{captureStream ? <><Square size={16} fill="currentColor" /> Stop capture</> : <><Monitor size={16} /> Start display capture</>}</button><span className={`control-hint ${captureError ? 'capture-error' : ''}`}>{captureError ?? (captureStream ? 'Real Windows display frames are in the preview.' : 'Preview is local only until you connect a source.')}</span><button className="icon-button" aria-label="Preview performance"><Gauge size={17} /></button></div>
           </section>
 
           <section className="scene-panel panel">

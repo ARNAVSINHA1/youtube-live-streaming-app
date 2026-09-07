@@ -32,6 +32,14 @@ Reason: this phase needs restart persistence before the main-process SQLite serv
 
 Consequence: this is not the final persistence architecture. Scene schema versioning, migrations, and SQLite/native storage replacement must happen before production profile and multi-device features.
 
+## ADR-012: Windows display capture through Electron media APIs
+
+Decision: use Electron's `desktopCapturer` request handler together with the browser `getDisplayMedia` API for the first Windows display-capture implementation.
+
+Reason: this uses maintained Electron/Chromium and Windows capture plumbing instead of inventing a frame protocol or native capture implementation. The stream lifecycle remains explicit and can later feed the media-engine facade.
+
+Consequence: the current phase captures the primary display only. Window selection, frame-latency measurement, packaged permission behavior, camera/audio sources, and mobile capture require separate validation and implementation.
+
 ## ADR-002: secure three-process boundary
 
 Decision: keep UI in the renderer, privileged orchestration in the main process, and expose only a typed preload bridge.

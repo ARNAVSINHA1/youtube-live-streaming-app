@@ -1,4 +1,4 @@
-import { app, BrowserWindow } from 'electron'
+import { app, BrowserWindow, desktopCapturer, session } from 'electron'
 import { join } from 'node:path'
 
 const createWindow = (): void => {
@@ -27,6 +27,17 @@ const createWindow = (): void => {
 }
 
 app.whenReady().then(() => {
+  session.defaultSession.setDisplayMediaRequestHandler((_request, callback) => {
+    desktopCapturer.getSources({ types: ['screen'] }).then((sources) => {
+      const primaryScreen = sources[0]
+      if (!primaryScreen) {
+        callback({})
+        return
+      }
+      callback({ video: primaryScreen })
+    }).catch(() => callback({}))
+  })
+
   createWindow()
 
   app.on('activate', () => {

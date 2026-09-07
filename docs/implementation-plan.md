@@ -43,9 +43,13 @@ Exit criteria: scene edits survive restart, ordering and transforms are determin
 
 ## Phase 3: Windows capture
 
+Status: in progress.
+
 Run a focused spike comparing Electron-supported capture with Windows Graphics Capture/native integration for latency, frame format, packaging, and stability. Implement display capture first, then window capture, feeding real frames to the preview pipeline.
 
-Exit criteria: a selected display is rendered in the preview with measured acceptable latency and clean stop behavior.
+Current implementation: the Electron desktop client requests a real primary-display MediaStream through `getDisplayMedia`, with a main-process `desktopCapturer` handler, visible preview frames, denial/error handling, track-ended cleanup, and explicit stop capture.
+
+Remaining exit criteria: validate frame latency and clean stop behavior on supported Windows hardware, add user-selectable display/window sources, and verify packaged-app permissions. No capture is claimed for mobile yet.
 
 ## Phase 4: camera and audio
 
