@@ -50,7 +50,15 @@ export function App() {
   const [streamStatus, setStreamStatus] = useState<StreamStatus>('Disconnected')
   const [captureStream, setCaptureStream] = useState<MediaStream | null>(null)
   const [captureError, setCaptureError] = useState<string | null>(null)
+  const [captureSources, setCaptureSources] = useState<Array<{ id: string; name: string; type: 'screen' | 'window' }>>([])
+  const [selectedCaptureSource, setSelectedCaptureSource] = useState('')
+  const [cameraStream, setCameraStream] = useState<MediaStream | null>(null)
+  const [cameraError, setCameraError] = useState<string | null>(null)
+  const [audioLevel, setAudioLevel] = useState(0)
   const previewVideoRef = useRef<HTMLVideoElement>(null)
+  const cameraVideoRef = useRef<HTMLVideoElement>(null)
+  const audioContextRef = useRef<AudioContext | null>(null)
+  const meterFrameRef = useRef<number | null>(null)
   const activeScene = sceneCollection.activeSceneId
   const activeSceneRecord = sceneCollection.scenes.find((scene) => scene.id === activeScene) ?? sceneCollection.scenes[0]
   const sources = activeSceneRecord?.sources ?? []
@@ -61,13 +69,32 @@ export function App() {
   }, [sceneCollection])
 
   useEffect(() => {
+    window.studio.listCaptureSources().then((availableSources) => {
+      setCaptureSources(availableSources)
+      setSelectedCaptureSource((current) => current || availableSources[0]?.id || '')
+    }).catch(() => setCaptureError('Capture sources could not be listed.'))
+  }, [])
+
+  useEffect(() => {
     if (previewVideoRef.current) previewVideoRef.current.srcObject = captureStream
     return () => {
       if (previewVideoRef.current) previewVideoRef.current.srcObject = null
     }
   }, [captureStream])
 
-  useEffect(() => () => captureStream?.getTracks().forEach((track) => track.stop()), [captureStream])
+  useEffect(() => {
+    if (cameraVideoRef.current) cameraVideoRef.current.srcObject = cameraStream
+    return () => {
+      if (cameraVideoRef.current) cameraVideoRef.current.srcObject = null
+    }
+  }, [cameraStream])
+
+  useEffect(() => () => {
+    captureStream?.getTracks().forEach((track) => track.stop())
+    cameraStream?.getTracks().forEach((track) => track.stop())
+    if (meterFrameRef.current !== null) cancelAnimationFrame(meterFrameRef.current)
+    void audioContextRef.current?.close()
+  }, [cameraStream, captureStream])
 
   const updateCollection = (next: SceneCollection) => setSceneCollection(next)
   const selectScene = (sceneId: string) => updateCollection({ ...sceneCollection, activeSceneId: sceneId })
@@ -96,6 +123,11 @@ export function App() {
   const startDisplayCapture = async () => {
     setCaptureError(null)
     try {
+      if (!selectedCaptureSource) {
+        setCaptureError('Select a display or window before starting capture.')
+        return
+      }
+      await window.studio.selectCaptureSource(selectedCaptureSource)
       const stream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 30 }, audio: false })
       stream.getVideoTracks()[0]?.addEventListener('ended', () => setCaptureStream(null), { once: true })
       setCaptureStream(stream)
@@ -107,6 +139,46 @@ export function App() {
   const stopDisplayCapture = () => {
     captureStream?.getTracks().forEach((track) => track.stop())
     setCaptureStream(null)
+  }
+
+  const startCameraAndMicrophone = async () => {
+    setCameraError(null)
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } },
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      })
+      stream.getTracks().forEach((track) => track.addEventListener('ended', stopCameraAndMicrophone, { once: true }))
+      setCameraStream(stream)
+      const audioTrack = stream.getAudioTracks()[0]
+      if (audioTrack) {
+        const audioContext = new AudioContext()
+        const analyser = audioContext.createAnalyser()
+        analyser.fftSize = 256
+        audioContext.createMediaStreamSource(new MediaStream([audioTrack])).connect(analyser)
+        const samples = new Uint8Array(analyser.fftSize)
+        const updateMeter = () => {
+          analyser.getByteTimeDomainData(samples)
+          const peak = samples.reduce((highest, sample) => Math.max(highest, Math.abs(sample - 128)), 0)
+          setAudioLevel(Math.min(100, Math.round((peak / 128) * 100)))
+          meterFrameRef.current = requestAnimationFrame(updateMeter)
+        }
+        audioContextRef.current = audioContext
+        updateMeter()
+      }
+    } catch (error) {
+      setCameraError(error instanceof DOMException && error.name === 'NotAllowedError' ? 'Camera or microphone permission was denied.' : 'Camera or microphone could not be started.')
+    }
+  }
+
+  const stopCameraAndMicrophone = () => {
+    cameraStream?.getTracks().forEach((track) => track.stop())
+    setCameraStream(null)
+    if (meterFrameRef.current !== null) cancelAnimationFrame(meterFrameRef.current)
+    meterFrameRef.current = null
+    setAudioLevel(0)
+    void audioContextRef.current?.close()
+    audioContextRef.current = null
   }
 
   const toggleStream = () => {
@@ -149,8 +221,9 @@ export function App() {
               {!captureStream && <><div className="canvas-grid" /><div className="empty-preview"><div className="preview-icon"><Monitor size={28} /></div><strong>Preview ready</strong><span>Add a capture source to see your scene here.</span></div></>}
               <div className="canvas-label"><span>1920 x 1080</span><span>30 FPS</span></div>
               {captureStream && <div className="capture-label"><Monitor size={14} /><span>Desktop Capture</span></div>}
+              {cameraStream && <div className="camera-tile"><video ref={cameraVideoRef} autoPlay muted playsInline /><span><Camera size={12} /> Camera</span></div>}
             </div>
-            <div className="preview-controls"><button className="control-button" onClick={captureStream ? stopDisplayCapture : startDisplayCapture}>{captureStream ? <><Square size={16} fill="currentColor" /> Stop capture</> : <><Monitor size={16} /> Start display capture</>}</button><span className={`control-hint ${captureError ? 'capture-error' : ''}`}>{captureError ?? (captureStream ? 'Real Windows display frames are in the preview.' : 'Preview is local only until you connect a source.')}</span><button className="icon-button" aria-label="Preview performance"><Gauge size={17} /></button></div>
+            <div className="preview-controls"><select className="capture-source-select" value={selectedCaptureSource} onChange={(event) => setSelectedCaptureSource(event.target.value)} disabled={Boolean(captureStream)} aria-label="Capture source"><option value="">Select capture source</option>{captureSources.map((source) => <option key={source.id} value={source.id}>{source.type === 'screen' ? 'Display' : 'Window'}: {source.name}</option>)}</select><button className="control-button" onClick={captureStream ? stopDisplayCapture : startDisplayCapture}>{captureStream ? <><Square size={16} fill="currentColor" /> Stop capture</> : <><Monitor size={16} /> Start capture</>}</button><span className={`control-hint ${captureError ? 'capture-error' : ''}`}>{captureError ?? (captureStream ? 'Real Windows display frames are in the preview.' : 'Select a display or window to preview it.')}</span><button className="icon-button" aria-label="Preview performance"><Gauge size={17} /></button></div>
           </section>
 
           <section className="scene-panel panel">
@@ -166,8 +239,9 @@ export function App() {
           </section>
 
           <section className="mixer-panel panel">
-            <div className="panel-header"><div><span className="eyebrow">Audio</span><h2>Mixer</h2></div><button className="icon-button" aria-label="Audio mixer settings"><SlidersHorizontal size={17} /></button></div>
-            <div className="mixer-list">{audioChannels.map((channel) => <div className="mixer-row" key={channel.name}><div className="mixer-label"><span className="channel-color" style={{ background: channel.color }} /><strong>{channel.name}</strong><span className="meter-value">{channel.level}%</span></div><div className="meter"><span className="meter-fill" style={{ width: `${channel.level}%`, background: channel.color }} /><span className="meter-peak" style={{ left: `${channel.peak}%` }} /></div><button className={`mute-button ${channel.muted ? 'is-muted' : ''}`} aria-label={`${channel.muted ? 'Unmute' : 'Mute'} ${channel.name}`}>{channel.muted ? <Mic2 size={15} /> : <Volume2 size={15} />}</button></div>)}</div>
+            <div className="panel-header"><div><span className="eyebrow">Audio</span><h2>Mixer</h2></div><div className="panel-actions"><button className="icon-button" onClick={cameraStream ? stopCameraAndMicrophone : startCameraAndMicrophone} aria-label={cameraStream ? 'Stop camera and microphone' : 'Start camera and microphone'}>{cameraStream ? <Square size={16} /> : <Camera size={17} />}</button><button className="icon-button" aria-label="Audio mixer settings"><SlidersHorizontal size={17} /></button></div></div>
+            {cameraError && <div className="device-error">{cameraError}</div>}
+            <div className="mixer-list">{audioChannels.map((channel) => <div className="mixer-row" key={channel.name}><div className="mixer-label"><span className="channel-color" style={{ background: channel.color }} /><strong>{channel.name}</strong><span className="meter-value">{channel.name === 'Mic / Aux' && cameraStream ? `${audioLevel}%` : `${channel.level}%`}</span></div><div className="meter"><span className="meter-fill" style={{ width: `${channel.name === 'Mic / Aux' && cameraStream ? audioLevel : channel.level}%`, background: channel.color }} /><span className="meter-peak" style={{ left: `${channel.peak}%` }} /></div><button className={`mute-button ${channel.muted ? 'is-muted' : ''}`} aria-label={`${channel.muted ? 'Unmute' : 'Mute'} ${channel.name}`}>{channel.muted ? <Mic2 size={15} /> : <Volume2 size={15} />}</button></div>)}</div>
           </section>
         </div>
       </section>

@@ -38,7 +38,15 @@ Decision: use Electron's `desktopCapturer` request handler together with the bro
 
 Reason: this uses maintained Electron/Chromium and Windows capture plumbing instead of inventing a frame protocol or native capture implementation. The stream lifecycle remains explicit and can later feed the media-engine facade.
 
-Consequence: the current phase captures the primary display only. Window selection, frame-latency measurement, packaged permission behavior, camera/audio sources, and mobile capture require separate validation and implementation.
+Consequence: the current phase supports selected display/window preview but not composition, camera/audio sources, frame-latency measurement, packaged permission validation, or mobile capture. Those require separate validation and implementation.
+
+## ADR-013: camera and microphone capture through Web Media APIs
+
+Decision: use `navigator.mediaDevices.getUserMedia` for the first Windows camera/microphone implementation and Web Audio `AnalyserNode` for a diagnostic microphone meter.
+
+Reason: Electron exposes Chromium's maintained device permission and media-capture path, avoiding a custom camera or audio protocol while the media engine is still being established.
+
+Consequence: the current implementation previews camera frames and measures input activity but does not yet mix, encode, mute, or route audio to a stream. Device selection, system audio, and packaged permission validation remain required.
 
 ## ADR-002: secure three-process boundary
 

@@ -1,5 +1,18 @@
-import { app, BrowserWindow, desktopCapturer, session } from 'electron'
+import { app, BrowserWindow, desktopCapturer, ipcMain, session } from 'electron'
 import { join } from 'node:path'
+
+type CaptureSourceInfo = { id: string; name: string; type: 'screen' | 'window' }
+
+let selectedCaptureSourceId: string | undefined
+
+const listCaptureSources = async (): Promise<CaptureSourceInfo[]> => {
+  const sources = await desktopCapturer.getSources({ types: ['screen', 'window'], thumbnailSize: { width: 0, height: 0 } })
+  return sources.map((source) => ({
+    id: source.id,
+    name: source.name,
+    type: source.id.startsWith('window:') ? 'window' : 'screen',
+  }))
+}
 
 const createWindow = (): void => {
   const window = new BrowserWindow({
@@ -27,14 +40,19 @@ const createWindow = (): void => {
 }
 
 app.whenReady().then(() => {
+  ipcMain.handle('capture:list-sources', () => listCaptureSources())
+  ipcMain.handle('capture:select-source', (_event, sourceId: string) => {
+    selectedCaptureSourceId = sourceId
+  })
+
   session.defaultSession.setDisplayMediaRequestHandler((_request, callback) => {
-    desktopCapturer.getSources({ types: ['screen'] }).then((sources) => {
-      const primaryScreen = sources[0]
-      if (!primaryScreen) {
+    desktopCapturer.getSources({ types: ['screen', 'window'] }).then((sources) => {
+      const selectedSource = sources.find((source) => source.id === selectedCaptureSourceId) ?? sources.find((source) => source.id.startsWith('screen:'))
+      if (!selectedSource) {
         callback({})
         return
       }
-      callback({ video: primaryScreen })
+      callback({ video: selectedSource })
     }).catch(() => callback({}))
   })
 

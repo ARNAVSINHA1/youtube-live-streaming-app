@@ -47,13 +47,19 @@ Status: in progress.
 
 Run a focused spike comparing Electron-supported capture with Windows Graphics Capture/native integration for latency, frame format, packaging, and stability. Implement display capture first, then window capture, feeding real frames to the preview pipeline.
 
-Current implementation: the Electron desktop client requests a real primary-display MediaStream through `getDisplayMedia`, with a main-process `desktopCapturer` handler, visible preview frames, denial/error handling, track-ended cleanup, and explicit stop capture.
+Current implementation: the Electron desktop client lists available screens and windows through a typed preload bridge, requests a real selected-source MediaStream through `getDisplayMedia`, and renders visible preview frames. The flow includes denial/error handling, track-ended cleanup, and explicit stop capture.
 
-Remaining exit criteria: validate frame latency and clean stop behavior on supported Windows hardware, add user-selectable display/window sources, and verify packaged-app permissions. No capture is claimed for mobile yet.
+Remaining exit criteria: validate frame latency and clean stop behavior on supported Windows hardware, verify packaged-app permissions, and feed selected frames into the scene compositor. No capture is claimed for mobile yet.
 
 ## Phase 4: camera and audio
 
+Status: in progress.
+
 Add webcam, microphone, and supported desktop-audio adapters. Add mixer controls for volume, mute, and meters. Verify device loss and permission failures are visible and recoverable.
+
+Current implementation: the Electron renderer requests real webcam and microphone tracks through `getUserMedia`, previews the camera, reports permission/device errors, stops tracks cleanly, and displays a microphone activity meter from a live Web Audio analyser. Desktop/system audio capture and mixer gain/mute routing are not implemented yet.
+
+Remaining exit criteria: add device selection, implement actual mixer controls, add supported desktop/system audio capture, validate device loss on Windows hardware, and route captured audio into the media pipeline.
 
 ## Phase 5: media pipeline
 
