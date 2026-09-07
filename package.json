@@ -1,0 +1,34 @@
+{
+  "name": "youtube-live-studio",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A Windows desktop studio for YouTube live streaming.",
+  "workspaces": [
+    "apps/mobile",
+    "packages/core"
+  ],
+  "main": "out/main/main.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "preview": "electron-vite preview",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "typecheck:mobile": "tsc --noEmit -p apps/mobile/tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "^5.1.1",
+    "electron": "latest",
+    "lucide-react": "latest",
+    "react": "latest",
+    "react-dom": "latest"
+  },
+  "devDependencies": {
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "electron-vite": "latest",
+    "typescript": "latest",
+    "vite": "^7.3.6",
+    "vitest": "latest"
+  }
+}
