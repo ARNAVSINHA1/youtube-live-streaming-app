@@ -1,13 +1,8 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Pressable, SafeAreaView, ScrollView, StyleSheet, Text, View } from 'react-native'
 import { StatusBar } from 'expo-status-bar'
-import { initialStudioSnapshot, type StreamStatus } from '@youtube-live-studio/core'
-
-const scenes = [
-  { id: 'main', name: 'Main Stage', sources: 4 },
-  { id: 'starting', name: 'Starting Soon', sources: 2 },
-  { id: 'break', name: 'Be Right Back', sources: 3 },
-]
+import AsyncStorage from '@react-native-async-storage/async-storage'
+import { createDefaultSceneCollection, initialStudioSnapshot, type SceneCollection, type StreamStatus } from '@youtube-live-studio/core'
 
 const statusCopy: Record<StreamStatus, string> = {
   Disconnected: 'Connect YouTube to prepare a broadcast.',
@@ -20,11 +15,24 @@ const statusCopy: Record<StreamStatus, string> = {
 }
 
 export default function App() {
-  const [activeScene, setActiveScene] = useState('main')
+  const [sceneCollection, setSceneCollection] = useState<SceneCollection>(createDefaultSceneCollection)
+  const [hydrated, setHydrated] = useState(false)
   const [streamStatus, setStreamStatus] = useState<StreamStatus>(initialStudioSnapshot.streamStatus)
-  const activeSceneName = scenes.find((scene) => scene.id === activeScene)?.name ?? 'Main Stage'
+  const activeScene = sceneCollection.scenes.find((scene) => scene.id === sceneCollection.activeSceneId) ?? sceneCollection.scenes[0]
+  const activeSceneName = activeScene?.name ?? 'Main Stage'
   const isStreaming = streamStatus === 'Streaming'
   const isPreparing = streamStatus === 'Preparing'
+
+  useEffect(() => {
+    AsyncStorage.getItem('signal.scene-collection').then((stored) => {
+      if (stored) setSceneCollection(JSON.parse(stored) as SceneCollection)
+      setHydrated(true)
+    }).catch(() => setHydrated(true))
+  }, [])
+
+  useEffect(() => {
+    if (hydrated) void AsyncStorage.setItem('signal.scene-collection', JSON.stringify(sceneCollection))
+  }, [hydrated, sceneCollection])
 
   const handleStreamPress = () => {
     if (isStreaming) {
@@ -59,7 +67,7 @@ export default function App() {
         </View>
 
         <View style={styles.sectionHeader}><Text style={styles.sectionTitle}>SCENES</Text><Text style={styles.sectionHint}>Select a scene</Text></View>
-        <View style={styles.sceneList}>{scenes.map((scene) => <Pressable key={scene.id} onPress={() => setActiveScene(scene.id)} style={[styles.sceneRow, activeScene === scene.id && styles.sceneRowActive]}><View style={styles.sceneIcon}><Text style={styles.sceneIconText}>▦</Text></View><View style={styles.sceneInfo}><Text style={styles.sceneName}>{scene.name}</Text><Text style={styles.sceneSources}>{scene.sources} sources</Text></View>{activeScene === scene.id && <View style={styles.activeMark} />}</Pressable>)}</View>
+        <View style={styles.sceneList}>{sceneCollection.scenes.map((scene) => <Pressable key={scene.id} onPress={() => setSceneCollection((current) => ({ ...current, activeSceneId: scene.id }))} style={[styles.sceneRow, activeScene?.id === scene.id && styles.sceneRowActive]}><View style={styles.sceneIcon}><Text style={styles.sceneIconText}>▦</Text></View><View style={styles.sceneInfo}><Text style={styles.sceneName}>{scene.name}</Text><Text style={styles.sceneSources}>{scene.sources.length} sources</Text></View>{activeScene?.id === scene.id && <View style={styles.activeMark} />}</Pressable>)}</View>
 
         <View style={styles.statusCard}><View style={styles.statusCardHeader}><Text style={styles.sectionTitle}>BROADCAST STATUS</Text><View style={styles.statusBadge}><View style={[styles.statusDot, isStreaming && styles.liveDot]} /><Text style={styles.statusBadgeText}>{streamStatus.toUpperCase()}</Text></View></View><Text style={styles.statusMessage}>{statusCopy[streamStatus]}</Text><Pressable onPress={handleStreamPress} disabled={isPreparing} style={[styles.streamButton, isStreaming && styles.stopButton, isPreparing && styles.disabledButton]}><Text style={styles.streamButtonText}>{isStreaming ? 'Stop stream' : isPreparing ? 'Preparing...' : 'Start stream'}</Text></Pressable></View>
 

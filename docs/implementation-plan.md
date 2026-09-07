@@ -35,9 +35,11 @@ Exit criteria: shared package tests pass, desktop still builds, mobile TypeScrip
 
 ## Phase 2: scene system
 
+Status: complete for the shared model and client configuration editors.
+
 Define versioned scene and source schemas. Implement persistence, source ordering, add/remove/duplicate/rename, visibility, and transforms. Start with display, window, camera, image, text, and background source records; source adapters may remain unavailable until their later phases.
 
-Exit criteria: scene edits survive restart, ordering and transforms are deterministic, and invalid records are rejected with diagnostics.
+Exit criteria: scene edits survive restart, ordering and transforms are deterministic, and invalid records are rejected with diagnostics. The current shell uses browser storage on desktop and AsyncStorage on mobile as a temporary Phase 2 persistence adapter; migration to the planned SQLite/native persistence layer remains part of the media/application-services work.
 
 ## Phase 3: Windows capture
 

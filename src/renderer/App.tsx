@@ -1,10 +1,12 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   Activity,
   AudioLines,
   Camera,
   ChevronDown,
+  ChevronUp,
   CircleHelp,
+  Copy,
   Eye,
   EyeOff,
   Gauge,
@@ -23,25 +25,60 @@ import {
   Settings,
   SlidersHorizontal,
   Square,
+  Trash2,
   Tv2,
   Video,
   Volume2,
   Wifi,
 } from 'lucide-react'
-import { audioChannels, scenes, sources, type StreamStatus } from './studio-state'
+import { addScene, addSource, createDefaultSceneCollection, createSource, duplicateSource, moveSource, removeSource, renameScene, setSourceVisibility, updateSourceTransform, type SceneCollection } from '@youtube-live-studio/core'
+import { audioChannels, type StreamStatus } from './studio-state'
 
-const iconMap = { monitor: Monitor, camera: Camera, image: Image, music: Music2 }
+const iconMap = { display: Monitor, window: Monitor, camera: Camera, image: Image, music: Music2, audio: Music2, text: Image, background: Image }
+
+const loadSceneCollection = (): SceneCollection => {
+  try {
+    const stored = window.localStorage.getItem('signal.scene-collection')
+    return stored ? JSON.parse(stored) as SceneCollection : createDefaultSceneCollection()
+  } catch {
+    return createDefaultSceneCollection()
+  }
+}
 
 export function App() {
-  const [activeScene, setActiveScene] = useState('main')
+  const [sceneCollection, setSceneCollection] = useState<SceneCollection>(loadSceneCollection)
   const [streamStatus, setStreamStatus] = useState<StreamStatus>('Disconnected')
-  const [sourceVisibility, setSourceVisibility] = useState<Record<string, boolean>>(
-    Object.fromEntries(sources.map((source) => [source.id, source.enabled])),
-  )
+  const activeScene = sceneCollection.activeSceneId
+  const activeSceneRecord = sceneCollection.scenes.find((scene) => scene.id === activeScene) ?? sceneCollection.scenes[0]
+  const sources = activeSceneRecord?.sources ?? []
   const isLive = streamStatus === 'Streaming'
 
+  useEffect(() => {
+    window.localStorage.setItem('signal.scene-collection', JSON.stringify(sceneCollection))
+  }, [sceneCollection])
+
+  const updateCollection = (next: SceneCollection) => setSceneCollection(next)
+  const selectScene = (sceneId: string) => updateCollection({ ...sceneCollection, activeSceneId: sceneId })
   const toggleSource = (sourceId: string) => {
-    setSourceVisibility((current) => ({ ...current, [sourceId]: !current[sourceId] }))
+    const source = sources.find((item) => item.id === sourceId)
+    if (source) updateCollection(setSourceVisibility(sceneCollection, activeScene, sourceId, !source.transform.visible))
+  }
+  const addNewScene = () => {
+    const id = `scene-${Date.now()}`
+    updateCollection({ ...addScene(sceneCollection, { id, name: 'New Scene', sources: [] }), activeSceneId: id })
+  }
+  const renameActiveScene = () => {
+    const name = window.prompt('Scene name', activeSceneRecord?.name ?? 'New Scene')?.trim()
+    if (name) updateCollection(renameScene(sceneCollection, activeScene, name))
+  }
+  const addNewSource = () => updateCollection(addSource(sceneCollection, activeScene, createSource(`source-${Date.now()}`, 'New Image', 'image', sources.length)))
+  const renameSource = (sourceId: string, currentName: string) => {
+    const name = window.prompt('Source name', currentName)?.trim()
+    if (name) updateCollection({ ...sceneCollection, scenes: sceneCollection.scenes.map((scene) => scene.id === activeScene ? { ...scene, sources: scene.sources.map((source) => source.id === sourceId ? { ...source, name } : source) } : scene) })
+  }
+  const nudgeSource = (sourceId: string) => {
+    const source = sources.find((item) => item.id === sourceId)
+    if (source) updateCollection(updateSourceTransform(sceneCollection, activeScene, sourceId, { x: source.transform.x + 10, y: source.transform.y + 10, opacity: Math.max(0.2, source.transform.opacity - 0.05) }))
   }
 
   const toggleStream = () => {
@@ -78,7 +115,7 @@ export function App() {
 
         <div className="studio-grid">
           <section className="preview-panel panel">
-            <div className="panel-header"><div><span className="eyebrow">Preview</span><h2>{scenes.find((scene) => scene.id === activeScene)?.name}</h2></div><div className="preview-meta"><span className="preview-live-dot" /> LIVE PREVIEW <button className="icon-button compact" aria-label="Preview options"><MoreHorizontal size={18} /></button></div></div>
+            <div className="panel-header"><div><span className="eyebrow">Preview</span><h2>{activeSceneRecord?.name}</h2></div><div className="preview-meta"><span className="preview-live-dot" /> LIVE PREVIEW <button className="icon-button compact" aria-label="Preview options"><MoreHorizontal size={18} /></button></div></div>
             <div className="preview-canvas">
               <div className="canvas-grid" />
               <div className="empty-preview"><div className="preview-icon"><Monitor size={28} /></div><strong>Preview ready</strong><span>Add a capture source to see your scene here.</span></div>
@@ -89,15 +126,15 @@ export function App() {
           </section>
 
           <section className="scene-panel panel">
-            <div className="panel-header"><div><span className="eyebrow">Production</span><h2>Scenes</h2></div><button className="icon-button accent" aria-label="Add scene"><Plus size={18} /></button></div>
-            <div className="scene-list">{scenes.map((scene) => <button key={scene.id} className={`scene-row ${activeScene === scene.id ? 'selected' : ''}`} onClick={() => setActiveScene(scene.id)}><span className="scene-thumbnail"><Tv2 size={17} /></span><span className="scene-details"><strong>{scene.name}</strong><small>{scene.sourceCount} sources</small></span>{activeScene === scene.id && <span className="active-mark" />}</button>)}</div>
-            <button className="outline-button"><Plus size={16} /> New scene</button>
+            <div className="panel-header"><div><span className="eyebrow">Production</span><h2>Scenes</h2></div><div className="panel-actions"><button className="icon-button compact" onClick={renameActiveScene} aria-label="Rename active scene"><Settings size={16} /></button><button className="icon-button accent" onClick={addNewScene} aria-label="Add scene"><Plus size={18} /></button></div></div>
+            <div className="scene-list">{sceneCollection.scenes.map((scene) => <button key={scene.id} className={`scene-row ${activeScene === scene.id ? 'selected' : ''}`} onClick={() => selectScene(scene.id)}><span className="scene-thumbnail"><Tv2 size={17} /></span><span className="scene-details"><strong>{scene.name}</strong><small>{scene.sources.length} sources</small></span>{activeScene === scene.id && <span className="active-mark" />}</button>)}</div>
+            <button className="outline-button" onClick={addNewScene}><Plus size={16} /> New scene</button>
           </section>
 
           <section className="sources-panel panel">
-            <div className="panel-header"><div><span className="eyebrow">Composition</span><h2>Sources</h2></div><button className="icon-button accent" aria-label="Add source"><Plus size={18} /></button></div>
-            <div className="source-list">{sources.map((source) => { const SourceIcon = iconMap[source.icon as keyof typeof iconMap]; const visible = sourceVisibility[source.id]; return <div className={`source-row ${visible ? '' : 'muted-row'}`} key={source.id}><button className="visibility-button" onClick={() => toggleSource(source.id)} aria-label={`${visible ? 'Hide' : 'Show'} ${source.name}`}>{visible ? <Eye size={16} /> : <EyeOff size={16} />}</button><span className="source-icon"><SourceIcon size={16} /></span><span className="source-details"><strong>{source.name}</strong><small>{source.kind}</small></span><button className="icon-button compact" aria-label={`${source.name} options`}><MoreHorizontal size={16} /></button></div> })}</div>
-            <button className="outline-button"><Plus size={16} /> Add source</button>
+            <div className="panel-header"><div><span className="eyebrow">Composition</span><h2>Sources</h2></div><button className="icon-button accent" onClick={addNewSource} aria-label="Add source"><Plus size={18} /></button></div>
+            <div className="source-list">{sources.map((source) => { const SourceIcon = iconMap[source.kind]; const visible = source.transform.visible; return <div className={`source-row ${visible ? '' : 'muted-row'}`} key={source.id}><button className="visibility-button" onClick={() => toggleSource(source.id)} aria-label={`${visible ? 'Hide' : 'Show'} ${source.name}`}>{visible ? <Eye size={16} /> : <EyeOff size={16} />}</button><span className="source-icon"><SourceIcon size={16} /></span><span className="source-details"><strong>{source.name}</strong><small>{source.kind} · x {source.transform.x} · y {source.transform.y}</small></span><button className="icon-button compact" onClick={() => updateCollection(moveSource(sceneCollection, activeScene, source.id, 'up'))} aria-label={`Move ${source.name} up`}><ChevronUp size={14} /></button><button className="icon-button compact" onClick={() => updateCollection(moveSource(sceneCollection, activeScene, source.id, 'down'))} aria-label={`Move ${source.name} down`}><ChevronDown size={14} /></button><button className="icon-button compact" onClick={() => updateCollection(duplicateSource(sceneCollection, activeScene, source.id, `${source.id}-copy-${Date.now()}`))} aria-label={`Duplicate ${source.name}`}><Copy size={14} /></button><button className="icon-button compact" onClick={() => nudgeSource(source.id)} aria-label={`Transform ${source.name}`}><SlidersHorizontal size={14} /></button><button className="icon-button compact" onClick={() => renameSource(source.id, source.name)} aria-label={`Rename ${source.name}`}><Settings size={14} /></button><button className="icon-button compact" onClick={() => updateCollection(removeSource(sceneCollection, activeScene, source.id))} aria-label={`Remove ${source.name}`}><Trash2 size={14} /></button></div> })}</div>
+            <button className="outline-button" onClick={addNewSource}><Plus size={16} /> Add source</button>
           </section>
 
           <section className="mixer-panel panel">

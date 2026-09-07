@@ -24,6 +24,14 @@ Reason: Android and iOS impose different permissions, lifecycle, background exec
 
 Consequence: the first mobile phases provide UI and contracts only. Real mobile streaming requires separate Android/iOS spikes and physical-device tests before claiming support.
 
+## ADR-011: temporary client persistence for Phase 2
+
+Decision: use `localStorage` in the desktop renderer and AsyncStorage on mobile for the initial scene editor, behind client-local persistence calls.
+
+Reason: this phase needs restart persistence before the main-process SQLite service and native mobile database adapter are implemented.
+
+Consequence: this is not the final persistence architecture. Scene schema versioning, migrations, and SQLite/native storage replacement must happen before production profile and multi-device features.
+
 ## ADR-002: secure three-process boundary
 
 Decision: keep UI in the renderer, privileged orchestration in the main process, and expose only a typed preload bridge.
