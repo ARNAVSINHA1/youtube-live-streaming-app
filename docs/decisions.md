@@ -46,7 +46,71 @@ Decision: use `navigator.mediaDevices.getUserMedia` for the first Windows camera
 
 Reason: Electron exposes Chromium's maintained device permission and media-capture path, avoiding a custom camera or audio protocol while the media engine is still being established.
 
-Consequence: the current implementation previews camera frames and measures input activity but does not yet mix, encode, mute, or route audio to a stream. Device selection, system audio, and packaged permission validation remain required.
+Consequence: the current implementation previews camera frames, measures input activity, and applies mute/gain to the diagnostic audio path but does not yet encode or route audio to a stream. System audio and packaged permission validation remain required.
+
+## ADR-014: FFmpeg capability and process boundary
+
+Decision: keep FFmpeg discovery, probing, process creation, diagnostics, and shutdown in the Electron main process. Accept an explicit configured path or a validated packaged/vendor binary; do not require a global install for production.
+
+Reason: the renderer must not launch arbitrary executables, and the application must distinguish an available encoder from a merely configured UI state.
+
+Consequence: development now provisions and probes a pinned FFmpeg 6.1.1 binary through `ffmpeg-static`. The final installer must include the binary, preserve its license files, and verify its packaged path before encoding or streaming can be enabled.
+
+## ADR-015: YouTube OAuth loopback and encrypted token storage
+
+Decision: use Google OAuth 2.0 authorization-code flow through a loopback callback on `127.0.0.1`, and encrypt the resulting token JSON with Electron `safeStorage` in the app user-data directory.
+
+Reason: the system browser handles Google sign-in and consent, while the loopback redirect avoids embedding credentials in the renderer. Windows-backed encryption protects refresh tokens at rest.
+
+Consequence: local OAuth client configuration is required, redirect-port conflicts must be surfaced, and authorization/revocation must remain separate from encoder and broadcast state.
+
+## ADR-016: YouTube Live API service boundary
+
+Decision: keep all YouTube Live Streaming API calls in a main-process service and expose only typed operation endpoints through preload.
+
+Reason: broadcast lifecycle and ingestion data are external side effects and must not be controlled directly by renderer code. The service can redact errors and preserve broadcast state independently from encoder state.
+
+Consequence: OAuth must be connected before operations can succeed, API responses must be validated, and no stream key or ingestion URL may enter normal diagnostics.
+
+## ADR-017: FFmpeg stdin transport for initial RTMPS path
+
+Decision: accept a WebM media byte stream on the main-process FFmpeg stdin, encode H.264/AAC, mux FLV, and send to the exact ingestion URL returned by YouTube.
+
+Reason: this provides a replaceable transport boundary without implementing RTMP/TLS or codecs from scratch. The API remains the source of truth for the destination.
+
+Consequence: the compositor and MediaRecorder/encoder adapter must provide correctly timed WebM chunks before this transport can be used. A transport process alone does not constitute a live stream.
+
+## ADR-018: guarded go-live transition
+
+Decision: prepare the YouTube broadcast and transport first, feed real MediaRecorder chunks, and transition the broadcast to `live` only after the first chunk is accepted by the transport.
+
+Reason: UI state must not claim LIVE while OAuth, broadcast creation, encoding, or media input has failed.
+
+Consequence: the current workflow uses display video plus microphone audio as the initial media input. Scene composition, transport-failure events, ingestion-health verification, and reconnect remain required before production streaming claims.
+
+## ADR-019: bounded transport reconnect
+
+Decision: retry the existing FFmpeg transport up to three times with a two-second delay, reusing the same YouTube broadcast and ingestion information.
+
+Reason: temporary transport failures should not create duplicate broadcasts or mutate YouTube lifecycle state unexpectedly.
+
+Consequence: retry exhaustion reports an error to the renderer. Ingestion-health verification, backoff configuration, and network interruption tests remain required before production reliability claims.
+
+## ADR-020: ingestion health before LIVE
+
+Decision: poll the YouTube Live Stream status and transition the broadcast to `live` only when YouTube reports `active` ingestion.
+
+Reason: a connected encoder process and an accepted socket do not prove YouTube is receiving the stream.
+
+Consequence: go-live can remain connecting or fail when API health does not become active. The polling delay and attempt count must be tuned with real YouTube tests.
+
+## ADR-021: Windows NSIS packaging
+
+Decision: use electron-builder with an NSIS target for the first Windows installer, including optional desktop/start-menu shortcuts and the provisioned FFmpeg binary/license resources.
+
+Reason: electron-builder provides a maintained Windows packaging path and supports the native/resource layout required by the media backend.
+
+Consequence: the current installer uses Electron's default icon and is unsigned in this development environment. Code signing, migration tests, crash diagnostics, and release-channel configuration remain deployment work.
 
 ## ADR-002: secure three-process boundary
 

@@ -55,10 +55,29 @@ export function App() {
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null)
   const [cameraError, setCameraError] = useState<string | null>(null)
   const [audioLevel, setAudioLevel] = useState(0)
+  const [cameraDevices, setCameraDevices] = useState<MediaDeviceInfo[]>([])
+  const [microphoneDevices, setMicrophoneDevices] = useState<MediaDeviceInfo[]>([])
+  const [selectedCameraId, setSelectedCameraId] = useState('')
+  const [selectedMicrophoneId, setSelectedMicrophoneId] = useState('')
+  const [microphoneMuted, setMicrophoneMuted] = useState(false)
+  const [microphoneVolume, setMicrophoneVolume] = useState(100)
+  const [ffmpegAvailable, setFfmpegAvailable] = useState(false)
+  const [youtubeAuth, setYoutubeAuth] = useState<{ connected: boolean; channelTitle: string | null; channelId: string | null; reason: string | null }>({ connected: false, channelTitle: null, channelId: null, reason: null })
+  const [youtubeAuthBusy, setYoutubeAuthBusy] = useState(false)
+  const [goLiveError, setGoLiveError] = useState<string | null>(null)
+  const [goLiveBusy, setGoLiveBusy] = useState(false)
+  const [streamMetrics, setStreamMetrics] = useState({ bitrateKbps: 0, bytesWritten: 0, transportStatus: 'stopped' })
+  const [systemMetrics, setSystemMetrics] = useState({ cpuPercent: 0, memoryMb: 0, gpuPercent: null as number | null })
+  const [captureMetrics, setCaptureMetrics] = useState({ fps: 0, droppedFrames: 0 })
   const previewVideoRef = useRef<HTMLVideoElement>(null)
   const cameraVideoRef = useRef<HTMLVideoElement>(null)
+  const compositorCanvasRef = useRef<HTMLCanvasElement>(null)
+  const compositorStreamRef = useRef<MediaStream | null>(null)
+  const compositorFrameRef = useRef<number | null>(null)
   const audioContextRef = useRef<AudioContext | null>(null)
+  const audioGainRef = useRef<GainNode | null>(null)
   const meterFrameRef = useRef<number | null>(null)
+  const recorderRef = useRef<MediaRecorder | null>(null)
   const activeScene = sceneCollection.activeSceneId
   const activeSceneRecord = sceneCollection.scenes.find((scene) => scene.id === activeScene) ?? sceneCollection.scenes[0]
   const sources = activeSceneRecord?.sources ?? []
@@ -76,6 +95,60 @@ export function App() {
   }, [])
 
   useEffect(() => {
+    window.studio.getFfmpegStatus().then((status) => setFfmpegAvailable(status.available)).catch(() => setFfmpegAvailable(false))
+  }, [])
+
+  useEffect(() => {
+    window.studio.getYouTubeAuthStatus().then(setYoutubeAuth).catch((error) => setYoutubeAuth({ connected: false, channelTitle: null, channelId: null, reason: error instanceof Error ? error.message : 'YouTube status is unavailable.' }))
+  }, [])
+
+  useEffect(() => window.studio.onTransportStatus((status) => {
+    if (status === 'reconnecting') {
+      setStreamStatus('Reconnecting')
+      setGoLiveError('Network transport interrupted. Reconnecting...')
+    }
+    if (status === 'error') {
+      setStreamStatus('Error')
+      setGoLiveError('The media transport stopped unexpectedly.')
+      setGoLiveBusy(false)
+      recorderRef.current = null
+    }
+    if (status === 'streaming' && streamStatus === 'Reconnecting') setStreamStatus('Connecting')
+    if (status === 'stopped' && (streamStatus === 'Streaming' || streamStatus === 'Reconnecting')) setStreamStatus('Stopped')
+  }), [streamStatus])
+
+  useEffect(() => {
+    if (streamStatus !== 'Streaming' && streamStatus !== 'Reconnecting' && streamStatus !== 'Connecting') return
+    const refreshMetrics = () => {
+      void window.studio.getGoLiveMetrics().then(setStreamMetrics)
+      void window.studio.getSystemMetrics().then(setSystemMetrics)
+      const track = captureStream?.getVideoTracks()[0]
+      const quality = previewVideoRef.current?.getVideoPlaybackQuality?.()
+      setCaptureMetrics({ fps: track?.getSettings().frameRate ?? 0, droppedFrames: quality?.droppedVideoFrames ?? 0 })
+    }
+    refreshMetrics()
+    const timer = window.setInterval(refreshMetrics, 1000)
+    return () => window.clearInterval(timer)
+  }, [captureStream, streamStatus])
+
+  const refreshMediaDevices = async () => {
+    const devices = await navigator.mediaDevices.enumerateDevices()
+    const cameras = devices.filter((device) => device.kind === 'videoinput')
+    const microphones = devices.filter((device) => device.kind === 'audioinput')
+    setCameraDevices(cameras)
+    setMicrophoneDevices(microphones)
+    setSelectedCameraId((current) => current || cameras[0]?.deviceId || '')
+    setSelectedMicrophoneId((current) => current || microphones[0]?.deviceId || '')
+  }
+
+  useEffect(() => {
+    void refreshMediaDevices().catch(() => setCameraError('Camera and microphone devices could not be listed.'))
+    const handleDeviceChange = () => void refreshMediaDevices()
+    navigator.mediaDevices.addEventListener('devicechange', handleDeviceChange)
+    return () => navigator.mediaDevices.removeEventListener('devicechange', handleDeviceChange)
+  }, [])
+
+  useEffect(() => {
     if (previewVideoRef.current) previewVideoRef.current.srcObject = captureStream
     return () => {
       if (previewVideoRef.current) previewVideoRef.current.srcObject = null
@@ -89,10 +162,41 @@ export function App() {
     }
   }, [cameraStream])
 
+  useEffect(() => {
+    const canvas = compositorCanvasRef.current
+    if (!canvas) return
+    canvas.width = 1920
+    canvas.height = 1080
+    const context = canvas.getContext('2d')
+    if (!context) return
+    const draw = () => {
+      context.fillStyle = '#111417'
+      context.fillRect(0, 0, canvas.width, canvas.height)
+      if (previewVideoRef.current?.readyState && captureStream) context.drawImage(previewVideoRef.current, 0, 0, canvas.width, canvas.height)
+      if (cameraVideoRef.current?.readyState && cameraStream) {
+        const cameraWidth = 420
+        const cameraHeight = 260
+        context.save()
+        context.translate(canvas.width - 44, 44)
+        context.scale(-1, 1)
+        context.drawImage(cameraVideoRef.current, 0, 0, cameraWidth, cameraHeight)
+        context.restore()
+      }
+      compositorFrameRef.current = requestAnimationFrame(draw)
+    }
+    draw()
+    return () => {
+      if (compositorFrameRef.current !== null) cancelAnimationFrame(compositorFrameRef.current)
+      compositorFrameRef.current = null
+    }
+  }, [cameraStream, captureStream])
+
   useEffect(() => () => {
     captureStream?.getTracks().forEach((track) => track.stop())
     cameraStream?.getTracks().forEach((track) => track.stop())
     if (meterFrameRef.current !== null) cancelAnimationFrame(meterFrameRef.current)
+    if (compositorFrameRef.current !== null) cancelAnimationFrame(compositorFrameRef.current)
+    compositorStreamRef.current?.getTracks().forEach((track) => track.stop())
     void audioContextRef.current?.close()
   }, [cameraStream, captureStream])
 
@@ -145,8 +249,8 @@ export function App() {
     setCameraError(null)
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } },
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+        video: { ...(selectedCameraId ? { deviceId: { exact: selectedCameraId } } : {}), width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } },
+        audio: { ...(selectedMicrophoneId ? { deviceId: { exact: selectedMicrophoneId } } : {}), echoCancellation: true, noiseSuppression: true, autoGainControl: true },
       })
       stream.getTracks().forEach((track) => track.addEventListener('ended', stopCameraAndMicrophone, { once: true }))
       setCameraStream(stream)
@@ -154,8 +258,10 @@ export function App() {
       if (audioTrack) {
         const audioContext = new AudioContext()
         const analyser = audioContext.createAnalyser()
+        const gain = audioContext.createGain()
         analyser.fftSize = 256
-        audioContext.createMediaStreamSource(new MediaStream([audioTrack])).connect(analyser)
+        gain.gain.value = microphoneVolume / 100
+        audioContext.createMediaStreamSource(new MediaStream([audioTrack])).connect(gain).connect(analyser)
         const samples = new Uint8Array(analyser.fftSize)
         const updateMeter = () => {
           analyser.getByteTimeDomainData(samples)
@@ -164,8 +270,10 @@ export function App() {
           meterFrameRef.current = requestAnimationFrame(updateMeter)
         }
         audioContextRef.current = audioContext
+        audioGainRef.current = gain
         updateMeter()
       }
+      await refreshMediaDevices()
     } catch (error) {
       setCameraError(error instanceof DOMException && error.name === 'NotAllowedError' ? 'Camera or microphone permission was denied.' : 'Camera or microphone could not be started.')
     }
@@ -179,10 +287,119 @@ export function App() {
     setAudioLevel(0)
     void audioContextRef.current?.close()
     audioContextRef.current = null
+    audioGainRef.current = null
   }
 
-  const toggleStream = () => {
-    setStreamStatus((current) => (current === 'Streaming' ? 'Stopped' : 'Error'))
+  const setMicrophoneMute = (muted: boolean) => {
+    cameraStream?.getAudioTracks().forEach((track) => { track.enabled = !muted })
+    setMicrophoneMuted(muted)
+  }
+
+  const setMicrophoneLevel = (volume: number) => {
+    setMicrophoneVolume(volume)
+    if (audioGainRef.current) audioGainRef.current.gain.value = volume / 100
+  }
+
+  const toggleStream = async () => {
+    setGoLiveError(null)
+    if (streamStatus === 'Streaming' || streamStatus === 'Connecting') {
+      recorderRef.current?.stop()
+      recorderRef.current = null
+      setGoLiveBusy(true)
+      try {
+        await window.studio.stopGoLive()
+        setStreamStatus('Stopped')
+      } catch (error) {
+        setStreamStatus('Error')
+        setGoLiveError(error instanceof Error ? error.message : 'The broadcast could not be stopped cleanly.')
+      } finally {
+        setGoLiveBusy(false)
+      }
+      return
+    }
+
+    if (!captureStream) {
+      setStreamStatus('Error')
+      setGoLiveError('Start display capture before going live.')
+      return
+    }
+    if (!cameraStream?.getAudioTracks().length) {
+      setStreamStatus('Error')
+      setGoLiveError('Start camera and microphone capture before going live.')
+      return
+    }
+    if (!youtubeAuth.connected) {
+      setStreamStatus('Error')
+      setGoLiveError('Connect a YouTube account before going live.')
+      return
+    }
+    if (!ffmpegAvailable) {
+      setStreamStatus('Error')
+      setGoLiveError('FFmpeg is unavailable. The encoder cannot start.')
+      return
+    }
+
+    const mimeType = ['video/webm;codecs=vp8,opus', 'video/webm'].find((candidate) => MediaRecorder.isTypeSupported(candidate))
+    if (!mimeType) {
+      setStreamStatus('Error')
+      setGoLiveError('This runtime does not provide a supported WebM recorder.')
+      return
+    }
+
+    setGoLiveBusy(true)
+    setStreamStatus('Preparing')
+    try {
+      await window.studio.prepareGoLive({ title: 'Morning Broadcast', description: 'Signal Live Studio broadcast', privacyStatus: 'private' })
+      const canvas = compositorCanvasRef.current
+      if (!canvas) throw new Error('Scene compositor is unavailable.')
+      const composedVideo = canvas.captureStream(30)
+      compositorStreamRef.current = composedVideo
+      const media = new MediaStream([...composedVideo.getVideoTracks(), ...cameraStream.getAudioTracks()])
+      const recorder = new MediaRecorder(media, { mimeType, videoBitsPerSecond: 6_000_000, audioBitsPerSecond: 128_000 })
+      let liveMarked = false
+      recorder.ondataavailable = async (event) => {
+        if (!event.data.size) return
+        try {
+          window.studio.writeMediaChunk(new Uint8Array(await event.data.arrayBuffer()))
+          if (!liveMarked) {
+            liveMarked = true
+            await window.studio.markGoLive()
+            setStreamStatus('Streaming')
+            setGoLiveBusy(false)
+          }
+        } catch (error) {
+          setStreamStatus('Error')
+          setGoLiveError(error instanceof Error ? error.message : 'Media transport failed.')
+        }
+      }
+      recorder.onerror = () => {
+        setStreamStatus('Error')
+        setGoLiveError('Media recording failed.')
+      }
+      recorder.start(1000)
+      recorderRef.current = recorder
+      setStreamStatus('Connecting')
+    } catch (error) {
+      setStreamStatus('Error')
+      setGoLiveError(error instanceof Error ? error.message : 'The YouTube broadcast could not be prepared.')
+      setGoLiveBusy(false)
+    }
+  }
+
+  const connectYouTube = async () => {
+    setYoutubeAuthBusy(true)
+    try {
+      setYoutubeAuth(await window.studio.connectYouTube())
+    } catch (error) {
+      setYoutubeAuth({ connected: false, channelTitle: null, channelId: null, reason: error instanceof Error ? error.message : 'YouTube authorization failed.' })
+    } finally {
+      setYoutubeAuthBusy(false)
+    }
+  }
+
+  const disconnectYouTube = async () => {
+    await window.studio.disconnectYouTube()
+    setYoutubeAuth({ connected: false, channelTitle: null, channelId: null, reason: null })
   }
 
   return (
@@ -200,8 +417,9 @@ export function App() {
         <div className="sidebar-spacer" />
         <div className="connection-card">
           <div className="connection-heading"><span className="status-dot" /> YouTube account</div>
-          <strong>Not connected</strong>
-          <button className="text-button">Connect account <ChevronDown size={14} /></button>
+          <strong>{youtubeAuth.connected ? youtubeAuth.channelTitle : 'Not connected'}</strong>
+          {youtubeAuth.connected ? <button className="text-button" onClick={disconnectYouTube}>Disconnect account <ChevronDown size={14} /></button> : <button className="text-button" onClick={connectYouTube} disabled={youtubeAuthBusy}>{youtubeAuthBusy ? 'Opening Google...' : 'Connect account'} <ChevronDown size={14} /></button>}
+          {youtubeAuth.reason && <small className="connection-error">{youtubeAuth.reason}</small>}
         </div>
         <button className="nav-item"><Settings size={18} /> <span>Settings</span></button>
         <div className="sidebar-footer"><CircleHelp size={15} /> Help center <span>v{window.studio.version}</span></div>
@@ -222,6 +440,7 @@ export function App() {
               <div className="canvas-label"><span>1920 x 1080</span><span>30 FPS</span></div>
               {captureStream && <div className="capture-label"><Monitor size={14} /><span>Desktop Capture</span></div>}
               {cameraStream && <div className="camera-tile"><video ref={cameraVideoRef} autoPlay muted playsInline /><span><Camera size={12} /> Camera</span></div>}
+              <canvas ref={compositorCanvasRef} className="compositor-canvas" aria-hidden="true" />
             </div>
             <div className="preview-controls"><select className="capture-source-select" value={selectedCaptureSource} onChange={(event) => setSelectedCaptureSource(event.target.value)} disabled={Boolean(captureStream)} aria-label="Capture source"><option value="">Select capture source</option>{captureSources.map((source) => <option key={source.id} value={source.id}>{source.type === 'screen' ? 'Display' : 'Window'}: {source.name}</option>)}</select><button className="control-button" onClick={captureStream ? stopDisplayCapture : startDisplayCapture}>{captureStream ? <><Square size={16} fill="currentColor" /> Stop capture</> : <><Monitor size={16} /> Start capture</>}</button><span className={`control-hint ${captureError ? 'capture-error' : ''}`}>{captureError ?? (captureStream ? 'Real Windows display frames are in the preview.' : 'Select a display or window to preview it.')}</span><button className="icon-button" aria-label="Preview performance"><Gauge size={17} /></button></div>
           </section>
@@ -241,7 +460,8 @@ export function App() {
           <section className="mixer-panel panel">
             <div className="panel-header"><div><span className="eyebrow">Audio</span><h2>Mixer</h2></div><div className="panel-actions"><button className="icon-button" onClick={cameraStream ? stopCameraAndMicrophone : startCameraAndMicrophone} aria-label={cameraStream ? 'Stop camera and microphone' : 'Start camera and microphone'}>{cameraStream ? <Square size={16} /> : <Camera size={17} />}</button><button className="icon-button" aria-label="Audio mixer settings"><SlidersHorizontal size={17} /></button></div></div>
             {cameraError && <div className="device-error">{cameraError}</div>}
-            <div className="mixer-list">{audioChannels.map((channel) => <div className="mixer-row" key={channel.name}><div className="mixer-label"><span className="channel-color" style={{ background: channel.color }} /><strong>{channel.name}</strong><span className="meter-value">{channel.name === 'Mic / Aux' && cameraStream ? `${audioLevel}%` : `${channel.level}%`}</span></div><div className="meter"><span className="meter-fill" style={{ width: `${channel.name === 'Mic / Aux' && cameraStream ? audioLevel : channel.level}%`, background: channel.color }} /><span className="meter-peak" style={{ left: `${channel.peak}%` }} /></div><button className={`mute-button ${channel.muted ? 'is-muted' : ''}`} aria-label={`${channel.muted ? 'Unmute' : 'Mute'} ${channel.name}`}>{channel.muted ? <Mic2 size={15} /> : <Volume2 size={15} />}</button></div>)}</div>
+            <div className="device-selectors"><label>Camera<select value={selectedCameraId} onChange={(event) => setSelectedCameraId(event.target.value)} disabled={Boolean(cameraStream)}><option value="">Default camera</option>{cameraDevices.map((device) => <option key={device.deviceId} value={device.deviceId}>{device.label || 'Camera device'}</option>)}</select></label><label>Microphone<select value={selectedMicrophoneId} onChange={(event) => setSelectedMicrophoneId(event.target.value)} disabled={Boolean(cameraStream)}><option value="">Default microphone</option>{microphoneDevices.map((device) => <option key={device.deviceId} value={device.deviceId}>{device.label || 'Microphone device'}</option>)}</select></label></div>
+            <div className="mixer-list">{audioChannels.map((channel) => <div className="mixer-row" key={channel.name}><div className="mixer-label"><span className="channel-color" style={{ background: channel.color }} /><strong>{channel.name}</strong><span className="meter-value">{channel.name === 'Mic / Aux' && cameraStream ? `${audioLevel}%` : `${channel.level}%`}</span></div><div className="meter"><span className="meter-fill" style={{ width: `${channel.name === 'Mic / Aux' && cameraStream ? audioLevel : channel.level}%`, background: channel.color }} /><span className="meter-peak" style={{ left: `${channel.peak}%` }} /></div>{channel.name === 'Mic / Aux' ? <><input className="volume-slider" type="range" min="0" max="100" value={microphoneVolume} onChange={(event) => setMicrophoneLevel(Number(event.target.value))} aria-label="Microphone volume" /><button className={`mute-button ${microphoneMuted ? 'is-muted' : ''}`} onClick={() => setMicrophoneMute(!microphoneMuted)} aria-label={`${microphoneMuted ? 'Unmute' : 'Mute'} microphone`}>{microphoneMuted ? <Mic2 size={15} /> : <Volume2 size={15} />}</button></> : <button className={`mute-button ${channel.muted ? 'is-muted' : ''}`} aria-label={`${channel.muted ? 'Unmute' : 'Mute'} ${channel.name}`}>{channel.muted ? <Mic2 size={15} /> : <Volume2 size={15} />}</button>}</div>)}</div>
           </section>
         </div>
       </section>
@@ -249,9 +469,10 @@ export function App() {
       <aside className="stream-rail">
         <div className="rail-header"><div><span className="eyebrow">Broadcast</span><h2>Go live</h2></div><div className={`stream-status ${streamStatus.toLowerCase()}`}><span /> {streamStatus}</div></div>
         <div className="destination-box"><div className="destination-icon"><Video size={19} /></div><div><span className="eyebrow">Destination</span><strong>YouTube Live</strong><small>Connect an account to continue</small></div><LockKeyhole size={16} className="locked-icon" /></div>
-        <button className="go-live-button" onClick={toggleStream} disabled={streamStatus === 'Preparing'}>{isLive ? <><Square size={16} fill="currentColor" /> Stop stream</> : <><Video size={17} /> Start stream</>}</button>
+        {goLiveError && <div className="go-live-error">{goLiveError}</div>}
+        <button className="go-live-button" onClick={() => void toggleStream()} disabled={goLiveBusy || streamStatus === 'Preparing'}>{isLive || streamStatus === 'Connecting' ? <><Square size={16} fill="currentColor" /> Stop stream</> : <><Video size={17} /> Start stream</>}</button>
         <div className="rail-section"><div className="rail-section-heading"><span>Stream health</span><Wifi size={16} /></div><div className="health-empty"><Activity size={19} /><span>Health data appears<br />when you are live.</span></div></div>
-        <div className="rail-section details-section"><div className="rail-section-heading"><span>Session details</span><MoreHorizontal size={16} /></div><dl><div><dt>Resolution</dt><dd>1920 x 1080</dd></div><div><dt>Frame rate</dt><dd>30 FPS</dd></div><div><dt>Bitrate</dt><dd>6,000 Kbps</dd></div><div><dt>Encoder</dt><dd>Not active</dd></div></dl></div>
+        <div className="rail-section details-section"><div className="rail-section-heading"><span>Session details</span><MoreHorizontal size={16} /></div><dl><div><dt>Resolution</dt><dd>1920 x 1080</dd></div><div><dt>Frame rate</dt><dd>{captureMetrics.fps ? `${Math.round(captureMetrics.fps)} FPS` : '0 FPS'}</dd></div><div><dt>Bitrate</dt><dd>{streamMetrics.bitrateKbps || 0} Kbps</dd></div><div><dt>Dropped frames</dt><dd>{captureMetrics.droppedFrames}</dd></div><div><dt>CPU / memory</dt><dd>{systemMetrics.cpuPercent.toFixed(1)}% / {systemMetrics.memoryMb} MB</dd></div><div><dt>GPU</dt><dd>{systemMetrics.gpuPercent === null ? 'Unavailable' : `${systemMetrics.gpuPercent.toFixed(1)}%`}</dd></div><div><dt>Encoder</dt><dd>{ffmpegAvailable ? 'FFmpeg available' : 'FFmpeg unavailable'}</dd></div></dl></div>
         <div className="rail-footer"><AudioLines size={15} /> Audio input ready <span className="ready-dot" /></div>
       </aside>
     </main>
