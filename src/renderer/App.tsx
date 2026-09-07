@@ -52,7 +52,7 @@ const loadSceneCollection = (): SceneCollection => {
 export function App() {
   const [sceneCollection, setSceneCollection] = useState<SceneCollection>(loadSceneCollection)
   const [streamStatus, setStreamStatus] = useState<StreamStatus>('Disconnected')
-    const [streamFormat, setStreamFormat] = useState<keyof typeof streamFormats>('horizontal')
+  const [streamFormat, setStreamFormat] = useState<keyof typeof streamFormats>('horizontal')
   const [captureStream, setCaptureStream] = useState<MediaStream | null>(null)
   const [captureError, setCaptureError] = useState<string | null>(null)
   const [captureSources, setCaptureSources] = useState<Array<{ id: string; name: string; type: 'screen' | 'window' }>>([])
